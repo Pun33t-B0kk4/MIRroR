@@ -16,7 +16,7 @@ export function asThread(value: unknown): Thread | null {
   if (!value || typeof value !== "object") return null;
   const thread = value as Thread;
   if (typeof thread.id !== "string" || typeof thread.slug !== "string") return null;
-  if (!thread.state || typeof thread.state.trust !== "number") return null;
+  if (!thread.progress || typeof thread.progress.strikes !== "number") return null;
   if (!Array.isArray(thread.messages) || !Array.isArray(thread.mirrorMessages)) return null;
   return thread;
 }

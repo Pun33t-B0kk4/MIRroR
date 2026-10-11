@@ -2,10 +2,9 @@ import type { Thread } from "@/lib/types";
 
 export function showingLabel(thread?: Thread) {
   if (!thread) return "";
-  if (thread.actsCompleted.includes("feedback")) return "Completed";
-  if (thread.actsCompleted.includes("repair")) return "Second showing";
-  if (thread.actsCompleted.includes("reflect")) return "Notes filed";
-  if (thread.shards.includes(thread.slug)) return "Switched chairs";
+  if (thread.progress.outcome === "resolved") return "Trophy earned";
+  if (thread.progress.outcome === "cooldown") return "Cooldown";
+  if (thread.messages.some((message) => message.role === "user")) return "In progress";
   return "";
 }
 

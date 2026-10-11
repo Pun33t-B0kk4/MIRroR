@@ -1,155 +1,178 @@
-import type { ScenePublic } from "@/lib/types";
+import type { Criterion, ScenePublic } from "@/lib/types";
+
+/*
+ * The five scenarios from "Confrontational Friend Scenarios" (Oct 10, 2026).
+ * Every scenario is the same situation: the user made a hurtful joke about a
+ * friend at a party, and the friend confronts them. Ordered easiest to hardest.
+ * Scenarios 1 and 4 use the default criteria; 2, 3 and 5 use variants.
+ */
+
+const ASK: Criterion = {
+  id: "C1",
+  label: "Asks clarifying questions",
+  meets:
+    "Asks a genuine, open question about the friend's own experience or feelings (what hurt, what it was like, what happened for them). Rhetorical, deflecting, or impatient questions, and questions about other people, do not count.",
+  misses:
+    "Assumes, projects, or answers for the friend instead of asking: supplying their reason or feelings for them, speaking for how others reacted, or asking a rhetorical question like \"you're seriously mad about that?\"",
+};
+
+const validate = (name: string): Criterion => ({
+  id: "C2",
+  label: `Validates ${name}'s feelings`,
+  meets: `Acknowledges that ${name}'s hurt makes sense, names why it hurt, or affirms their right to feel it, without minimizing.`,
+  misses: `Dismisses, minimizes, blames ${name}, or excuses the joke with intent ("it was just a joke", "you're overthinking it", "it's not that big a deal", "you were laughing too").`,
+});
+
+const apologize = (name: string): Criterion => ({
+  id: "C3",
+  label: "Apologizes and asks what to do differently",
+  meets: `Gives a clear apology for their own action (no "but", no "sorry you feel that way") and asks ${name} what to do differently or what would help.`,
+  misses: `Gives a non-apology ("sorry you feel that way", "sorry if"), an apology with a "but", rushes or demands forgiveness, or refuses to ask what to change.`,
+});
 
 export const scenes: ScenePublic[] = [
   {
-    slug: "empty-slide",
-    numeral: "I",
-    title: "The Empty Slide",
-    minutes: "8 min",
-    logline: "Your teammate's slides are blank the night before the critique.",
-    setting: "A campus studio, after the group chat got sharp.",
+    slug: "jordan",
+    level: 1,
+    title: "The Loading Screen",
+    forgiveness: "Easily forgiving",
+    logline: "You called Jordan \"the human loading screen\" in front of their crush.",
+    setting: "The day after Friday's party.",
     premise:
-      "You and Jordan Reyes are presenting tomorrow. Their section is still empty. You said so in the group chat. Jordan asked to talk in person. You do not know why the work is missing, and the critique will not move itself.",
-    agreeable:
-      "You're right to be frustrated. Jordan dropped the ball, and you shouldn't have to carry a teammate who doesn't care. You deserve an apology.",
+      "At a Friday party, you called Jordan \"the human loading screen\" while Jordan was talking to someone they like. People laughed, and the crush walked off. Jordan wants to talk.",
     character: {
-      name: "Jordan Reyes",
+      name: "Jordan",
       pronouns: "they/them",
-      role: "teammate, second-year illustration",
-      aim: "Keep some dignity, and get to a plan that is not a public verdict.",
-      boundary: "They will not be cross-examined for an audience, and they will not agree that they do not care.",
+      role: "your best friend since freshman year",
+      personality: "Warm, conflict-averse, downplays their own feelings at first.",
     },
-    cues: [
-      { id: "ask", label: "Ask what you don't know", text: "Help me understand what happened on your side before I decide what I think. " },
-      { id: "need", label: "Name the work", text: "I need the slides done, and I also need to know what you can actually finish. " },
-      { id: "impact", label: "Name the impact", text: "When the section was still empty tonight, the effect on me was " },
-      { id: "boundary", label: "Leave them a choice", text: "You don't have to tell the whole group. I do need a plan for " },
-    ],
+    criteria: [ASK, validate("Jordan"), apologize("Jordan")],
+    trophy: { title: "The Loading Screen", skill: "Curious first, sorry second." },
   },
   {
-    slug: "the-joke",
-    numeral: "II",
-    title: "The Joke",
-    minutes: "7 min",
-    logline: "A joke about Priya's accent got a laugh. She did not find it funny.",
-    setting: "The hallway outside a seminar, the morning after the group chat.",
+    slug: "priya",
+    level: 2,
+    title: "The Early Exit",
+    forgiveness: "Gentle but guarded",
+    logline: "You mocked Priya for leaving the party early to study.",
+    setting: "Your shared dorm room, the next morning.",
     premise:
-      "You made a joke in the group chat that copied Priya Nair's accent. People laughed. Priya left the chat. You came to talk to her. Intent and impact are not currently on the same side of this.",
-    agreeable:
-      "You were joking, and friends should be able to take a joke. If Priya is hurt, that's something she needs to work through. You don't owe a big apology.",
+      "When Priya left the party early, you announced, \"Priya's going home to make out with her textbook,\" and the room laughed. Priya brings it up the next morning.",
     character: {
-      name: "Priya Nair",
+      name: "Priya",
       pronouns: "she/her",
-      role: "friend, linguistics major",
-      aim: "To be met on the impact, not recruited into a debate about whether you meant it.",
-      boundary: "She will not relitigate your intent, and she does not owe quick forgiveness.",
+      role: "your roommate and best friend",
+      personality: "Soft-spoken, private, shuts down when misread.",
     },
-    cues: [
-      { id: "ask", label: "Ask what landed", text: "What happened on your side when you read that message? " },
-      { id: "sorry", label: "Own the impact", text: "I'm sorry. The laugh does not make it fine. " },
-      { id: "need", label: "Say what you'll do", text: "What I need to do next, including in the chat, is " },
-      { id: "boundary", label: "Don't demand the ending", text: "You don't owe me forgiveness today. I do want to " },
+    criteria: [
+      {
+        ...ASK,
+        label: "Asks clarifying questions instead of assuming",
+      },
+      {
+        id: "C2",
+        label: "Reflects Priya's feelings back in their own words",
+        meets:
+          "Puts Priya's feeling into their own words in a way that shows they understood it (not just \"I get it\"), e.g. naming that the joke made her feel like an outsider.",
+        misses:
+          "Dismisses, minimizes, or tells Priya what she feels (\"it's the stress talking\", \"you'll get used to it\", \"it'll feel smaller tomorrow\").",
+      },
+      {
+        id: "C3",
+        label: "Offers one concrete repair action",
+        meets:
+          "Apologizes and offers one specific, concrete thing they will do differently (e.g. walking her out and telling people she has an exam).",
+        misses:
+          "Gives a non-apology (\"sorry if it came out wrong\"), refuses to commit to any change, or deflects (\"I can't control what other people think\", \"I don't know what you want from me\").",
+      },
     ],
+    trophy: { title: "The Early Exit", skill: "Ask, don't assume." },
   },
   {
-    slug: "office-hours",
-    numeral: "III",
-    title: "Office Hours",
-    minutes: "8 min",
-    logline: "You want a grade revisited. Professor Adeyemi wants to talk about the claim.",
-    setting: "A narrow office, ten minutes before her next student.",
+    slug: "marcus",
+    level: 3,
+    title: "The Drink Run",
+    forgiveness: "Defensive, sarcastic",
+    logline: "You joked about Marcus not being able to afford drinks.",
+    setting: "Outside the dining hall, two days after the party.",
     premise:
-      "Professor Amara Adeyemi marked your central claim unsupported. You spent a week on the draft and asked for the grade to be revisited. She agreed to ten minutes. She has not agreed that effort is the subject.",
-    agreeable:
-      "You worked hard, and the grade doesn't reflect that. You should push her. You're not wrong for wanting fairness.",
+      "When Marcus passed on the drink run, you said, \"Don't worry, Marcus's scholarship doesn't cover fun.\" Marcus finds you after class.",
     character: {
-      name: "Amara Adeyemi",
-      pronouns: "she/her",
-      role: "professor of argumentation",
-      aim: "To talk about the argument itself. Effort is not the grade.",
-      boundary: "She will not raise a grade to be kind, and she will not be managed emotionally.",
-    },
-    cues: [
-      { id: "ask", label: "Ask about the claim", text: "Help me understand which part of the argument failed, specifically. " },
-      { id: "need", label: "Separate effort from the claim", text: "I need to know what evidence would actually support the sentence. " },
-      { id: "impact", label: "Say what the note did", text: "When I read the margin note, I felt " },
-      { id: "boundary", label: "Stay with the disagreement", text: "I still disagree with this part, and I want to show you why: " },
-    ],
-  },
-  {
-    slug: "unfinished",
-    numeral: "IV",
-    title: "The Unfinished Thing",
-    minutes: "8 min",
-    logline: "Mateo put an idea you were still making into his portfolio.",
-    setting: "A coffee shop between two classes.",
-    premise:
-      "You and Mateo Alvarez share a studio doc. This morning you saw a page of your unfinished idea in his public portfolio. You asked to meet. He does not know yet that you are angry, and you do not know yet how he read the doc.",
-    agreeable:
-      "Mateo used your idea. That's not okay, and you're allowed to be angry. You don't need to soften it.",
-    character: {
-      name: "Mateo Alvarez",
+      name: "Marcus",
       pronouns: "he/him",
-      role: "friend, communication design",
-      aim: "To explain himself before he is sentenced, and to find out whether the friendship is still available.",
-      boundary: "He will not accept 'thief' as the opening, and he will not pretend the page is not public.",
+      role: "your best friend from high school, now at the same college",
+      personality: "Jokes to cover hurt, quick to bristle, loyal once trust returns.",
     },
-    cues: [
-      { id: "ask", label: "Ask how he read it", text: "Help me understand how you decided the idea was yours to post. " },
-      { id: "need", label: "Name the boundary", text: "I need that page taken down, and I need the credit to be clear. " },
-      { id: "impact", label: "Name the impact", text: "When I saw it in the portfolio, the effect on me was " },
-      { id: "boundary", label: "Leave room", text: "You don't have to have the perfect explanation. I do need " },
+    criteria: [
+      ASK,
+      {
+        id: "C2",
+        label: "Takes responsibility with no \"but\" or intent excuses",
+        meets:
+          "Owns the impact plainly, with no \"but\" and no excuse about intent or being drunk (e.g. \"That's on me. Being drunk doesn't change that.\").",
+        misses:
+          "Excuses or minimizes: \"it was a joke\", \"everyone was drunk\", \"I didn't mean it like that\", \"I'm sorry, but...\", or \"you joke about money yourself\".",
+      },
+      {
+        id: "C3",
+        label: "Apologizes and asks which topics are off-limits",
+        meets:
+          "Gives a clean apology and asks Marcus what topics they should never joke about.",
+        misses:
+          "Treats the apology as a box to check (\"I said sorry, what else do you want?\") or refuses to ask what to change.",
+      },
     ],
+    trophy: { title: "The Drink Run", skill: "No buts." },
   },
   {
-    slug: "after-the-client",
-    numeral: "V",
-    title: "After the Client",
-    minutes: "7 min",
-    logline: "Ren corrected you while the client was still in the room.",
-    setting: "A small meeting room, door half shut, client gone.",
+    slug: "sofia",
+    level: 4,
+    title: "The Secret",
+    forgiveness: "Hurt, accusatory",
+    logline: "You turned a breakup Sofia told you in confidence into a joke.",
+    setting: "Sofia's doorway, the day after the party.",
     premise:
-      "In front of a client, Ren Okonkwo said your recommendation was wrong. The client is gone. You asked for five minutes. The feedback may have been accurate. The room it happened in is a separate question.",
-    agreeable:
-      "Being criticized in public is never okay. Ren was out of line, and you should make sure they know how unprofessional that was.",
+      "Sofia told you privately that her ex broke up with her over text. At the party, you joked, \"Careful, Sofia's phone might dump you,\" and people asked her about it all night.",
     character: {
-      name: "Ren Okonkwo",
-      pronouns: "they/them",
-      role: "project manager",
-      aim: "To stand by the content of the feedback and still hear what the setting cost you.",
-      boundary: "They will not retract a correction they believe is true, and they will not be called unprofessional as a way to end the talk.",
-    },
-    cues: [
-      { id: "ask", label: "Ask why then", text: "Help me understand why that note had to happen while the client was in the room. " },
-      { id: "need", label: "Separate content and setting", text: "I can talk about whether the recommendation was wrong. I need to say what the setting did. " },
-      { id: "impact", label: "Name the impact", text: "When you said it in front of them, I felt " },
-      { id: "boundary", label: "Hold your point", text: "I'm not asking you to pretend the work was fine. I am asking that next time " },
-    ],
-  },
-  {
-    slug: "quiet-kitchen",
-    numeral: "VI",
-    title: "The Quiet Kitchen",
-    minutes: "8 min",
-    logline: "Your roommate has been eating in her room. You thought she was done with you.",
-    setting: "The kitchen you share, late, one lamp on.",
-    premise:
-      "Samira Hassan has been quiet since Thursday, eating in her room, barely saying goodnight. You had asked her, earlier in the week, not to have friends over during finals. You took the silence as punishment. She asked, carefully, whether she read you wrong.",
-    agreeable:
-      "Samira is being cold, and you have every right to feel rejected. You should tell her she needs to communicate like an adult.",
-    character: {
-      name: "Samira Hassan",
+      name: "Sofia",
       pronouns: "she/her",
-      role: "roommate, pre-med",
-      aim: "To find out whether she misread you, without being punished for going quiet.",
-      boundary: "She will not accept 'dramatic' as the description of her silence, and she will not pretend the apartment has felt easy.",
+      role: "your closest friend since orientation",
+      personality: "Direct, emotional, keeps score when hurt, deeply loyal.",
     },
-    cues: [
-      { id: "ask", label: "Ask what she heard", text: "What happened on your side? I think I may have the story wrong. " },
-      { id: "need", label: "Name what you needed", text: "I needed the apartment quieter during finals, and I also need us to actually talk. " },
-      { id: "impact", label: "Name the silence", text: "When you stopped coming into the kitchen, I felt " },
-      { id: "boundary", label: "Give her the choice", text: "You don't have to explain everything tonight. I do want to clear up " },
+    criteria: [ASK, validate("Sofia"), apologize("Sofia")],
+    trophy: { title: "The Secret", skill: "Trust is the real topic." },
+  },
+  {
+    slug: "dev",
+    level: 5,
+    title: "The Story",
+    forgiveness: "Least forgiving, needs space",
+    logline: "Your body-shaming joke about Dev ended up on someone's Instagram story.",
+    setting: "After intramural practice.",
+    premise:
+      "As Dev went back for more food, you said, \"Third plate, someone warn the couch.\" A partygoer filmed it and posted it to their Instagram story. Dev has seen it.",
+    character: {
+      name: "Dev",
+      pronouns: "he/him",
+      role: "your best friend and teammate on the intramural soccer team",
+      personality: "Blunt, slow to trust, shuts the door when pushed.",
+    },
+    criteria: [
+      ASK,
+      {
+        ...validate("Dev"),
+        label: "Validates Dev's feelings without minimizing them",
+      },
+      {
+        id: "C3",
+        label: "Apologizes, takes one repair step, and respects Dev's need for space",
+        meets:
+          "Apologizes, takes or commits to one concrete repair step (e.g. asking the poster to take it down, correcting it with the team), and respects Dev's request for space without pushing. This criterion is met only once all three parts have happened, across one or more turns.",
+        misses:
+          "Rushes or demands forgiveness (\"so are we good?\", \"can we just hang out tonight?\"), pushes after Dev asks for space, or treats the apology as a transaction.",
+      },
     ],
+    trophy: { title: "The Story", skill: "Resolution isn't always instant." },
   },
 ];
 

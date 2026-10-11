@@ -1,19 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import type { Feedback } from "@/lib/types";
+import type { Feedback, ResponseFeedback } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
+/*
+ * Role-reversal review. Required: the end-of-scenario actions (try again, the
+ * optional mirror chair, pick another friend) only appear once the user has
+ * stepped through every response.
+ */
 export function FeedbackView({
   feedback,
   name,
-  onAgain,
-  onHome,
+  actions,
 }: {
   feedback: Feedback;
   name: string;
-  onAgain: () => void;
-  onHome: () => void;
+  actions: ReactNode;
 }) {
   const [shown, setShown] = useState(0);
   const end = useRef<HTMLDivElement>(null);
@@ -28,7 +32,7 @@ export function FeedbackView({
   return (
     <div className="flex flex-col gap-4">
       <section className="bubble-in rounded-3xl border border-border bg-card p-5 text-foreground">
-        <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Your feedback</p>
+        <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">From {name}&apos;s side</p>
         <p className="mt-2 text-base leading-7">{feedback.summary}</p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <Points title="What worked" items={feedback.pros} tone="pro" />
@@ -38,9 +42,12 @@ export function FeedbackView({
 
       {feedback.responses.slice(0, shown).map((item, index) => (
         <section key={item.messageId} className="bubble-in rounded-3xl border border-border bg-card p-5 text-foreground">
-          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-            Response {index + 1} of {total}
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+              Response {index + 1} of {total}
+            </p>
+            <ResultChip item={item} />
+          </div>
           <blockquote className="mt-2 rounded-2xl bg-accent/25 px-4 py-3 text-base leading-7">“{item.text}”</blockquote>
           {item.reply ? (
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -59,18 +66,7 @@ export function FeedbackView({
       ))}
 
       {done ? (
-        <section className="bubble-in rounded-3xl border border-moss/30 bg-moss p-6 text-center text-white">
-          <p className="font-display text-3xl leading-tight">You have successfully completed this scenario.</p>
-          <p className="mt-2 text-sm text-white/80">Every line you wrote is above. Try it again and see what changes.</p>
-          <div className="mt-5 flex flex-wrap justify-center gap-2">
-            <Button type="button" variant="accent" onClick={onAgain}>
-              Try it again
-            </Button>
-            <Button type="button" variant="outline" onClick={onHome}>
-              Pick another conversation
-            </Button>
-          </div>
-        </section>
+        actions
       ) : (
         <div className="flex justify-center">
           <Button type="button" variant="accent" size="lg" onClick={() => setShown((value) => value + 1)}>
@@ -98,5 +94,20 @@ function Points({ title, items, tone }: { title: string; items: string[]; tone: 
         ))}
       </ul>
     </div>
+  );
+}
+
+function ResultChip({ item }: { item: ResponseFeedback }) {
+  return (
+    <span
+      className={cn(
+        "rounded-full px-2 py-1 text-[0.65rem] uppercase tracking-wide",
+        item.result === "met" && "bg-moss text-white",
+        item.result === "strike" && "bg-destructive text-white",
+        item.result === "neutral" && "bg-secondary text-muted-foreground",
+      )}
+    >
+      {item.tag}
+    </span>
   );
 }

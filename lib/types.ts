@@ -1,16 +1,3 @@
-export const STATE_KEYS = [
-  "trust",
-  "frustration",
-  "openness",
-  "unresolved",
-  "boundary",
-  "repair",
-] as const;
-
-export type StateKey = (typeof STATE_KEYS)[number];
-
-export type RelationshipState = Record<StateKey, number>;
-
 export type SignalKey =
   | "accusation"
   | "curiosity"
@@ -36,7 +23,37 @@ export type Expression =
   | "steady"
   | "firm";
 
-export type Act = "talk" | "mirror" | "reflect" | "repair" | "feedback";
+export type CriterionId = "C1" | "C2" | "C3";
+
+export type Criterion = {
+  id: CriterionId;
+  /** Short label shown in the review, e.g. "Asks clarifying questions". */
+  label: string;
+  /** What a turn must do to meet this criterion. Used by the turn labeler. */
+  meets: string;
+  /** What a turn does to earn a strike against this criterion. */
+  misses: string;
+};
+
+/** How one user turn was judged. Strikes and met criteria never mix on one turn. */
+export type TurnLabel = {
+  met: CriterionId[];
+  strike: CriterionId | null;
+  note: string;
+  source: "live" | "rules";
+};
+
+export type Outcome = "open" | "resolved" | "cooldown";
+
+/** Hidden game state. Never shown to the user during the conversation. */
+export type Progress = {
+  met: CriterionId[];
+  strikes: number;
+  warned: boolean;
+  outcome: Outcome;
+};
+
+export type Act = "talk" | "review" | "mirror";
 
 export type Voice = "live" | "house";
 
@@ -45,16 +62,17 @@ export type Message = {
   role: "user" | "character" | "stage" | "mirror-self";
   text: string;
   at: string;
-  signals?: Signals;
-  delta?: Partial<RelationshipState>;
+  label?: TurnLabel;
   voice?: Voice;
-  points?: number;
 };
 
 export type ResponseFeedback = {
   messageId: string;
   text: string;
   reply: string;
+  result: "met" | "strike" | "neutral";
+  /** e.g. "C1 met: Asks clarifying questions" or "Strike: C2 miss". */
+  tag: string;
   pros: string[];
   cons: string[];
   tryInstead: string;
@@ -68,81 +86,39 @@ export type Feedback = {
   createdAt: string;
 };
 
-export type CustomScene = {
-  problem: string;
-  scene: ScenePublic;
-  voice: string;
-  opening: string;
-  hidden: string;
-  revealLine: string;
-  afterReveal: string;
-  keywords: string[];
-};
-
-export type SceneEvent = {
-  id: string;
-  label: string;
-  detail: string;
-};
-
-export type TurningPoint = {
-  messageId: string;
-  quote: string;
-  note: string;
-};
-
-export type ReflectionPrompt = {
-  id: string;
-  question: string;
-  answer: string;
-};
-
 export type Thread = {
   id: string;
   slug: string;
   act: Act;
-  state: RelationshipState;
   messages: Message[];
   mirrorMessages: Message[];
-  totals: Signals;
+  progress: Progress;
+  /** Whether the friend has shared their hidden backstory. */
   revealed: boolean;
-  events: SceneEvent[];
-  turningPoint: TurningPoint | null;
-  reflection: ReflectionPrompt[];
-  shards: string[];
-  actsCompleted: Act[];
-  repairVisits: number;
-  stalled: boolean;
-  sharpest: string;
   voice: Voice;
   createdAt: string;
   updatedAt: string;
-  points?: number;
-  feedback?: Feedback | null;
-  custom?: CustomScene;
-};
-
-export type Cue = {
-  id: string;
-  label: string;
-  text: string;
+  endedAt: string | null;
+  feedback: Feedback | null;
 };
 
 export type ScenePublic = {
   slug: string;
-  numeral: string;
+  level: number;
   title: string;
-  minutes: string;
+  forgiveness: string;
   logline: string;
   setting: string;
   premise: string;
-  agreeable: string;
   character: {
     name: string;
     pronouns: string;
     role: string;
-    aim: string;
-    boundary: string;
+    personality: string;
   };
-  cues: Cue[];
+  criteria: Criterion[];
+  trophy: {
+    title: string;
+    skill: string;
+  };
 };
