@@ -1,29 +1,33 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FeedbackView } from "@/components/feedback-view";
 import { Portrait } from "@/components/portrait";
-import { ScenarioComposer } from "@/components/scenario-composer";
 import { Button } from "@/components/ui/button";
-import { expressionFor } from "@/lib/engine";
+import { cooldownEndsAt, expressionFor, formatWait } from "@/lib/game";
 import { scenes } from "@/lib/scenes";
 import { postJson, showingLabel } from "@/lib/status";
-import type { Thread } from "@/lib/types";
+import type { ScenePublic, Thread } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const acts = [
-  { id: "talk", label: "Talk" },
-  { id: "mirror", label: "Switch" },
-  { id: "feedback", label: "Feedback" },
-] as const;
+/*
+ * The whole game lives here:
+ *   home   → pick one of five friends, easiest to hardest
+ *   talk   → conversation; strikes and criteria stay hidden
+ *   review → trophy or cooldown card, then the required role-reversal review
+ *   mirror → optional: answer as the friend while your own lines come back at you
+ *
+ * Saved conversations and the simulated 6-hour cooldown live in this browser
+ * only (proof of concept, no accounts).
+ */
 
-const SWITCH_AFTER_MS = 2 * 60 * 1000;
 const savedKey = "mirror-threads";
+const skipKey = "mirror-cooldown-skips";
 
 function readSaved(): Thread[] {
   try {
     const parsed = JSON.parse(localStorage.getItem(savedKey) ?? "") as { threads?: Thread[] };
-    return Array.isArray(parsed.threads) ? parsed.threads : [];
+    return Array.isArray(parsed.threads) ? parsed.threads.filter((item) => item?.progress) : [];
   } catch {
     return [];
   }
@@ -31,17 +35,39 @@ function readSaved(): Thread[] {
 
 function remember(thread: Thread) {
   try {
-    const next = [thread, ...readSaved().filter((item) => item.id !== thread.id)].slice(0, 24);
+    const next = [thread, ...readSaved().filter((item) => item.id !== thread.id)].slice(0, 30);
     localStorage.setItem(savedKey, JSON.stringify({ threads: next }));
   } catch {
     // The chat still works for this visit if the browser blocks storage.
   }
 }
 
+function readSkips(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(skipKey) ?? "[]") as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function latestFor(threads: Thread[], slug: string) {
+  return threads
+    .filter((item) => item.slug === slug)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+}
+
+/** Milliseconds left on a simulated cooldown, or 0 if the friend is available. */
+function lockLeft(thread: Thread | undefined, skips: string[], clock: number) {
+  if (!thread || thread.progress.outcome !== "cooldown" || skips.includes(thread.id)) return 0;
+  return Math.max(0, cooldownEndsAt(thread.endedAt) - clock);
+}
+
 export function ChatApp() {
   const [threads, setThreads] = useState<Thread[]>([]);
-  const [slug, setSlug] = useState<string | null>(null);
+  const [skips, setSkips] = useState<string[]>([]);
   const [thread, setThread] = useState<Thread | null>(null);
+  const [opening, setOpening] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [reviewing, setReviewing] = useState(false);
@@ -50,68 +76,45 @@ export function ChatApp() {
   const [clock, setClock] = useState(() => Date.now());
   const scroller = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
-  const scene = thread?.custom?.scene ?? scenes.find((item) => item.slug === slug) ?? null;
+  const triedReview = useRef<string | null>(null);
+  const scene = thread ? scenes.find((item) => item.slug === thread.slug) ?? null : null;
 
   useEffect(() => {
-    let ignore = false;
-    async function load() {
-      const local = readSaved();
-      try {
-        const response = await fetch("/api/threads");
-        const data = (await response.json()) as { threads?: Thread[] };
-        const remote = data.threads ?? [];
-        const byId = new Map(local.map((item) => [item.id, item]));
-        for (const item of remote) byId.set(item.id, item);
-        if (!ignore) setThreads([...byId.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
-      } catch {
-        if (!ignore) setThreads(local);
-      }
-    }
-    void load();
-    return () => {
-      ignore = true;
-    };
+    setThreads(readSaved());
+    setSkips(readSkips());
   }, [thread?.updatedAt]);
 
   useEffect(() => {
-    if (thread?.act === "feedback") {
-      scroller.current?.scrollTo({ top: 0 });
-      return;
-    }
+    const id = window.setInterval(() => setClock(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
-  }, [thread?.messages.length, thread?.mirrorMessages.length, thread?.act, busy]);
+  }, [thread?.messages.length, thread?.mirrorMessages.length, thread?.act, busy, reviewing]);
 
   useEffect(() => {
     const home = () => {
-      setSlug(null);
       setThread(null);
+      setOpening(null);
       setError("");
     };
     window.addEventListener("mirror-home", home);
     return () => window.removeEventListener("mirror-home", home);
   }, []);
 
-  const firstAt = thread?.messages.find((message) => message.role === "user")?.at ?? null;
-  const readyAt = firstAt ? new Date(firstAt).getTime() + SWITCH_AFTER_MS : null;
-
-  useEffect(() => {
-    if (readyAt === null) return;
-    const id = window.setTimeout(() => setClock(Date.now()), Math.max(0, readyAt - Date.now()) + 50);
-    return () => window.clearTimeout(id);
-  }, [readyAt]);
-
-  const said = thread?.messages.filter((message) => message.role === "user").length ?? 0;
-  const expression = thread ? expressionFor(thread.state, thread.stalled) : "guarded";
+  function keep(next: Thread) {
+    remember(next);
+    setThread(next);
+    setBoop((value) => value + 1);
+  }
 
   async function run(task: () => Promise<{ thread: Thread }>) {
     setBusy(true);
     setError("");
     try {
       const data = await task();
-      remember(data.thread);
-      setSlug(data.thread.slug);
-      setThread(data.thread);
-      setBoop((value) => value + 1);
+      keep(data.thread);
       return data.thread;
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "That message didn't land.");
@@ -121,261 +124,234 @@ export function ChatApp() {
     }
   }
 
-  function openThread(next: Thread) {
-    remember(next);
+  const askReview = useCallback(async (current: Thread) => {
+    triedReview.current = current.id;
+    setReviewing(true);
     setError("");
-    setDraft("");
-    setSlug(next.slug);
-    setThread(next);
-  }
-
-  async function openChat(nextSlug: string, existing?: Thread) {
-    setSlug(nextSlug);
-    setError("");
-    setDraft("");
-    if (existing) {
-      setThread(existing);
-      return;
-    }
-    setThread(null);
-    setBusy(true);
     try {
-      const data = await postJson<{ thread: Thread }>("/api/threads", { slug: nextSlug });
+      const data = await postJson<{ thread: Thread }>("/api/feedback", { threadId: current.id, thread: current });
       remember(data.thread);
       setThread(data.thread);
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : "The review didn't load.");
+    } finally {
+      setReviewing(false);
+    }
+  }, []);
+
+  // The review is required, so it starts on its own as soon as the conversation ends.
+  useEffect(() => {
+    if (!thread || thread.progress.outcome === "open" || thread.feedback) return;
+    if (busy || reviewing || triedReview.current === thread.id) return;
+    void askReview(thread);
+  }, [thread, busy, reviewing, askReview]);
+
+  async function startNew(slug: string) {
+    setOpening(slug);
+    setThread(null);
+    setError("");
+    setDraft("");
+    setBusy(true);
+    try {
+      const data = await postJson<{ thread: Thread }>("/api/threads", { slug });
+      keep(data.thread);
     } catch (openError) {
-      setSlug(null);
-      setThread(null);
       setError(openError instanceof Error ? openError.message : "Could not start the chat.");
     } finally {
       setBusy(false);
+      setOpening(null);
     }
   }
 
-  async function restart() {
-    if (!thread) return;
+  function openFriend(slug: string) {
+    // Reopen the latest attempt (in progress, or its review); otherwise start one.
+    const saved = latestFor(threads, slug);
+    setError("");
     setDraft("");
-    if (thread.custom) {
-      const custom = thread.custom;
-      await run(() => postJson("/api/custom", { scenario: custom }));
+    if (saved) {
+      triedReview.current = null;
+      setThread(saved);
       return;
     }
-    await openChat(thread.slug);
+    void startNew(slug);
   }
 
-  async function askFeedback() {
-    if (!thread) return;
-    const current = thread;
-    setReviewing(true);
-    await run(() => postJson("/api/feedback", { threadId: current.id, thread: current }));
-    setReviewing(false);
+  function skipCooldown(id: string) {
+    const next = [...new Set([...readSkips(), id])];
+    try {
+      localStorage.setItem(skipKey, JSON.stringify(next));
+    } catch {
+      // Skipping still works for this visit.
+    }
+    setSkips(next);
   }
 
   async function send(event: React.FormEvent) {
     event.preventDefault();
     if (!thread || !draft.trim() || busy) return;
     const text = draft.trim();
+    const mode = thread.act === "mirror" ? "mirror" : "talk";
     setDraft("");
-    const mode = thread.act === "mirror" ? "mirror" : thread.act === "repair" ? "repair" : "talk";
     await run(() => postJson("/api/turn", { threadId: thread.id, text, mode, thread }));
     box.current?.focus();
   }
 
-  if (!scene) {
-    const recent = threads.filter((item) => item.custom).slice(0, 4);
+  const home = () => {
+    setThread(null);
+    setError("");
+  };
+
+  if (!thread || !scene) {
     return (
       <main className="h-full overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl px-4 py-4 pb-16">
-          <p className="text-sm text-muted-foreground">Pick someone. They will not automatically take your side.</p>
-          <ul className="mt-4 grid gap-3 sm:grid-cols-2">
-            {scenes.map((item, index) => {
-              const saved = threads.find((entry) => entry.slug === item.slug);
-              const status = showingLabel(saved);
-              return (
-                <li key={item.slug} className="bubble-in" style={{ animationDelay: `${index * 50}ms` }}>
-                  <button
-                    type="button"
-                    onClick={() => void openChat(item.slug, saved)}
-                    className="flex w-full items-center gap-3 rounded-3xl border border-border bg-card/85 p-3 text-left backdrop-blur-sm hover:bg-secondary"
-                  >
-                    <Portrait slug={item.slug} name={item.character.name} expression={saved ? expressionFor(saved.state, saved.stalled) : "guarded"} className="h-16 w-14 shrink-0" />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="font-medium">{item.character.name}</span>
-                        {status ? <span className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">{status}</span> : null}
+          <p className="text-sm text-muted-foreground">
+            You made a joke at a party that hurt a friend. Now they want to talk. They get harder to win back as you go.
+          </p>
+          <ul className="mt-4 grid gap-3">
+            {[...scenes]
+              .sort((a, b) => a.level - b.level)
+              .map((item, index) => {
+                const saved = latestFor(threads, item.slug);
+                const left = lockLeft(saved, skips, clock);
+                const status = left ? `Cooldown · ${formatWait(left)}` : showingLabel(saved);
+                return (
+                  <li key={item.slug} className="bubble-in" style={{ animationDelay: `${index * 50}ms` }}>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => openFriend(item.slug)}
+                      className="flex w-full items-center gap-3 rounded-3xl border border-border bg-card/85 p-3 text-left backdrop-blur-sm hover:bg-secondary disabled:opacity-70"
+                    >
+                      <Portrait
+                        slug={item.slug}
+                        name={item.character.name}
+                        expression={saved ? expressionFor(saved.progress) : "guarded"}
+                        className="h-16 w-14 shrink-0"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="font-medium">
+                            {item.character.name}
+                            <span className="ml-2 text-xs font-normal text-muted-foreground">
+                              Level {item.level} · {item.forgiveness}
+                            </span>
+                          </span>
+                          {status ? (
+                            <span className="shrink-0 text-[0.65rem] uppercase tracking-wide text-muted-foreground">{status}</span>
+                          ) : null}
+                        </span>
+                        <span className="mt-1 block text-sm leading-5 text-muted-foreground">{item.logline}</span>
                       </span>
-                      <span className="mt-1 block text-sm leading-5 text-muted-foreground">{item.logline}</span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
+                    </button>
+                  </li>
+                );
+              })}
           </ul>
           {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
-          {busy ? <p className="mt-3 text-sm text-muted-foreground">Opening the chat…</p> : null}
-
-          <ScenarioComposer onReady={openThread} />
-
-          {recent.length ? (
-            <section className="mt-6">
-              <h3 className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Your scenarios</h3>
-              <ul className="mt-3 grid gap-3 sm:grid-cols-2">
-                {recent.map((item) => {
-                  const own = item.custom!.scene;
-                  const status = showingLabel(item);
-                  return (
-                    <li key={item.id}>
-                      <button
-                        type="button"
-                        onClick={() => openThread(item)}
-                        className="flex w-full items-center gap-3 rounded-3xl border border-border bg-card/85 p-3 text-left backdrop-blur-sm hover:bg-secondary"
-                      >
-                        <Portrait slug={own.slug} name={own.character.name} expression={expressionFor(item.state, item.stalled)} className="h-14 w-12 shrink-0" />
-                        <span className="min-w-0 flex-1">
-                          <span className="flex items-center justify-between gap-2">
-                            <span className="truncate font-medium">{own.character.name}</span>
-                            {status ? <span className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">{status}</span> : null}
-                          </span>
-                          <span className="mt-1 block truncate text-sm text-muted-foreground">{own.title}</span>
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          ) : null}
+          {opening ? <p className="mt-3 text-sm text-muted-foreground">Opening the chat…</p> : null}
         </div>
       </main>
     );
   }
 
-  if (!thread) {
-    return (
-      <main className="grid h-full place-items-center gap-3 px-6 text-center">
-        <p className="text-sm text-muted-foreground">{error || "Opening the chat…"}</p>
-        {error ? (
-          <Button type="button" variant="outline" onClick={() => { setSlug(null); setError(""); }}>
-            Back to chats
-          </Button>
-        ) : null}
-      </main>
-    );
-  }
-
   const mirror = thread.act === "mirror";
-  const finished = thread.act === "feedback" && Boolean(thread.feedback);
-  const talking = thread.act === "talk" || thread.act === "repair";
+  const ended = thread.progress.outcome !== "open";
   const transcript = mirror ? thread.mirrorMessages : thread.messages;
-  const mirrorReplies = thread.mirrorMessages.filter((message) => message.role === "user").length;
-  const switchReady = readyAt !== null && clock >= readyAt;
-  const showSwitch = talking && said >= 2 && (switchReady || thread.stalled) && !busy;
-  const offerFeedback = !finished && !reviewing && ((mirror && mirrorReplies >= 2) || thread.stalled || thread.act === "reflect");
-  const canType = (talking || mirror) && !thread.stalled;
-  const home = () => {
-    setSlug(null);
-    setThread(null);
-  };
+  const canType = !busy && (mirror || !ended);
+  const left = lockLeft(thread, skips, clock);
+  const stageLabel = mirror ? "Their chair" : ended ? "Review" : "Talk";
 
   return (
     <main className="mx-auto flex h-full w-full max-w-3xl flex-col px-3 py-3 sm:px-4">
       <p className="sr-only" aria-live="polite">
-        {busy ? (reviewing ? "Reviewing your responses" : `${scene.character.name} is typing`) : ""}
+        {busy ? `${mirror ? "You, from the other chair," : scene.character.name} is typing` : reviewing ? "Reviewing your responses" : ""}
       </p>
       <header className="flex items-center gap-3 rounded-3xl border border-border bg-card px-3 py-2">
         <Portrait
           key={boop}
           slug={scene.slug}
           name={scene.character.name}
-          expression={expression}
+          expression={expressionFor(thread.progress)}
           mirrored={mirror}
           className="portrait-pop h-12 w-11"
         />
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium">{mirror ? `${scene.character.name} (you)` : scene.character.name}</p>
-          {mirror ? <p className="truncate text-xs text-muted-foreground">Hearing your own voice</p> : null}
+          <p className="truncate text-xs text-muted-foreground">
+            {mirror ? "Hearing your own voice from their side" : `Level ${scene.level} · ${scene.forgiveness}`}
+          </p>
         </div>
-        <ol className="hidden gap-1 sm:flex" aria-label="Progress">
-          {acts.map((act) => {
-            const done =
-              thread.actsCompleted.includes(act.id) ||
-              (act.id === "talk" && said > 0) ||
-              (act.id === "mirror" && mirrorReplies > 0);
-            const current = thread.act === act.id || (act.id === "talk" && thread.act === "repair");
-            return (
-              <li
-                key={act.id}
-                className={cn(
-                  "rounded-full px-2 py-1 text-[0.65rem] uppercase tracking-wide",
-                  current ? "bg-accent text-accent-foreground" : done ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground",
-                )}
-              >
-                {act.label}
-              </li>
-            );
-          })}
-        </ol>
+        <span className="rounded-full bg-secondary px-2 py-1 text-[0.65rem] uppercase tracking-wide text-muted-foreground">
+          {stageLabel}
+        </span>
       </header>
 
       <div
         ref={scroller}
         className={cn("stage-wash mt-3 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-[1.6rem] p-4", mirror && "mirror-sweep")}
-        data-mood={expression}
+        data-mood={expressionFor(thread.progress)}
         data-mode={mirror ? "mirror" : "scene"}
         tabIndex={0}
         aria-label="Conversation"
       >
-        {finished && thread.feedback ? (
-          <FeedbackView key={thread.id} feedback={thread.feedback} name={scene.character.name} onAgain={() => void restart()} onHome={home} />
-        ) : (
+        {!mirror ? <p className="bubble-in max-w-md text-sm leading-6 text-stage-foreground/75">{scene.premise}</p> : null}
+        {transcript.map((message) => (
+          <Bubble key={message.id} role={message.role} text={message.text} name={scene.character.name} mirror={mirror} />
+        ))}
+        {busy ? <Typing name={mirror ? "You, from the other chair" : scene.character.name} /> : null}
+
+        {ended && !mirror ? (
           <>
-            <p className="bubble-in max-w-md text-sm leading-6 text-stage-foreground/75">{scene.premise}</p>
-            {transcript.map((message) => (
-              <Bubble key={message.id} role={message.role} text={message.text} name={scene.character.name} mirror={mirror} />
-            ))}
-            {offerFeedback ? (
-              <div className="bubble-in mr-auto max-w-[85%]">
-                <p className="px-2 text-[0.65rem] uppercase tracking-[0.14em] text-stage-foreground/60">MIRROR</p>
-                <div className="mt-1 rounded-3xl rounded-bl-md border border-white/15 bg-white/10 px-4 py-3 text-stage-foreground">
-                  <p>
-                    {thread.stalled
-                      ? `${scene.character.name} has stepped back from this one.`
-                      : "You've heard how it sounds from the other side."}{" "}
-                    You can keep going, or stop here and get detailed feedback on every response you gave.
-                  </p>
-                  <Button type="button" variant="accent" size="sm" className="mt-3" disabled={busy} onClick={() => void askFeedback()}>
-                    Stop and get feedback
-                  </Button>
-                </div>
+            <ResultCard thread={thread} scene={scene} left={left} />
+            {thread.feedback ? (
+              <FeedbackView
+                key={thread.id}
+                feedback={thread.feedback}
+                name={scene.character.name}
+                actions={
+                  <EndActions
+                    scene={scene}
+                    left={left}
+                    busy={busy}
+                    onMirror={() => void run(() => postJson("/api/act", { threadId: thread.id, act: "mirror", thread }))}
+                    onAgain={() => void startNew(scene.slug)}
+                    onSkip={() => skipCooldown(thread.id)}
+                    onHome={home}
+                  />
+                }
+              />
+            ) : reviewing ? (
+              <Typing name="MIRROR is reviewing your responses" />
+            ) : error ? (
+              <div className="flex justify-center">
+                <Button type="button" variant="accent" onClick={() => void askReview(thread)}>
+                  Load the review
+                </Button>
               </div>
             ) : null}
-            {busy ? <Typing name={reviewing ? "MIRROR is reviewing your responses" : mirror ? "You, from the other chair" : scene.character.name} /> : null}
           </>
-        )}
+        ) : null}
       </div>
 
       {error ? <p className="mt-2 text-sm text-destructive">{error}</p> : null}
 
-      {!finished ? (
-        <div className="mt-3 flex flex-wrap items-end gap-2">
-          {showSwitch ? (
-            <div className="relative">
-              <div role="status" className="nudge-float pointer-events-none absolute bottom-full left-0 mb-3 w-60 rounded-2xl bg-moss px-3 py-2 text-sm leading-5 text-white shadow-lg">
-                Curious how that sounded to {scene.character.name}? Switch seats and hear it from their side.
-                <span aria-hidden="true" className="absolute -bottom-1.5 left-6 size-3 rotate-45 bg-moss" />
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="moss"
-                onClick={() => void run(() => postJson("/api/act", { threadId: thread.id, act: "mirror", thread }))}
-              >
-                Switch perspective
-              </Button>
-            </div>
-          ) : null}
-          <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => void restart()}>
-            New chat
+      {mirror ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => void run(() => postJson("/api/act", { threadId: thread.id, act: "review", thread }))}
+          >
+            Back to your review
+          </Button>
+        </div>
+      ) : !ended ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={home}>
+            Leave for now
           </Button>
         </div>
       ) : null}
@@ -390,7 +366,6 @@ export function ChatApp() {
             ref={box}
             value={draft}
             rows={2}
-            disabled={busy}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
@@ -401,7 +376,7 @@ export function ChatApp() {
             placeholder={mirror ? `Reply as ${scene.character.name}…` : `Message ${scene.character.name}…`}
             className="min-h-14 flex-1 resize-none rounded-3xl border border-border bg-card px-4 py-3 text-base outline-none"
           />
-          <Button type="submit" variant="accent" disabled={busy || !draft.trim()} className="h-12">
+          <Button type="submit" variant="accent" disabled={!draft.trim()} className="h-12">
             Send
           </Button>
         </form>
@@ -410,17 +385,82 @@ export function ChatApp() {
   );
 }
 
-function Bubble({
-  role,
-  text,
-  name,
-  mirror,
+function ResultCard({ thread, scene, left }: { thread: Thread; scene: ScenePublic; left: number }) {
+  const name = scene.character.name;
+  if (thread.progress.outcome === "resolved") {
+    const strikes = thread.progress.strikes;
+    return (
+      <section className="bubble-in rounded-3xl border border-moss/30 bg-moss p-6 text-center text-white">
+        <p className="text-xs uppercase tracking-[0.18em] text-white/75">Scenario complete</p>
+        <p className="mt-2 font-display text-3xl leading-tight">{scene.trophy.title}</p>
+        {strikes ? (
+          <p className="mt-1 text-sm text-white/80">
+            {strikes} {strikes === 1 ? "strike" : "strikes"}
+          </p>
+        ) : null}
+        <p className="mt-4 text-sm text-white/90">
+          Skill unlocked: <span className="font-medium">{scene.trophy.skill}</span>
+        </p>
+      </section>
+    );
+  }
+  return (
+    <section className="bubble-in rounded-3xl border border-border bg-card p-6 text-center text-foreground">
+      <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Cooldown</p>
+      <p className="mt-2 font-display text-2xl leading-tight">{name} needs some space.</p>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        {left
+          ? `You can try this conversation again in ${formatWait(left)}.`
+          : "You can try this conversation again now."}{" "}
+        While you wait, review what happened from {name}&apos;s side.
+      </p>
+    </section>
+  );
+}
+
+function EndActions({
+  scene,
+  left,
+  busy,
+  onMirror,
+  onAgain,
+  onSkip,
+  onHome,
 }: {
-  role: string;
-  text: string;
-  name: string;
-  mirror: boolean;
+  scene: ScenePublic;
+  left: number;
+  busy: boolean;
+  onMirror: () => void;
+  onAgain: () => void;
+  onSkip: () => void;
+  onHome: () => void;
 }) {
+  return (
+    <section className="bubble-in rounded-3xl border border-border bg-card p-5 text-center text-foreground">
+      <p className="text-sm leading-6 text-muted-foreground">
+        Optional: sit in {scene.character.name}&apos;s chair and hear your own lines said back to you.
+      </p>
+      <div className="mt-4 flex flex-wrap justify-center gap-2">
+        <Button type="button" variant="moss" disabled={busy} onClick={onMirror}>
+          Sit in their chair
+        </Button>
+        <Button type="button" variant="accent" disabled={busy || left > 0} onClick={onAgain}>
+          {left ? `Try again in ${formatWait(left)}` : "Try again"}
+        </Button>
+        <Button type="button" variant="outline" onClick={onHome}>
+          Pick another friend
+        </Button>
+      </div>
+      {left ? (
+        <button type="button" onClick={onSkip} className="mt-3 text-xs text-muted-foreground underline underline-offset-2">
+          Skip cooldown (demo)
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
+function Bubble({ role, text, name, mirror }: { role: string; text: string; name: string; mirror: boolean }) {
   if (role === "stage") {
     return <p className="bubble-in px-2 text-center text-sm italic text-stage-foreground/75">{text}</p>;
   }
@@ -429,7 +469,13 @@ function Bubble({
   return (
     <div className={cn("bubble-in max-w-[85%]", mine ? "ml-auto" : "mr-auto")}>
       <p className="px-2 text-[0.65rem] uppercase tracking-[0.14em] text-stage-foreground/60">{label}</p>
-      <p className={mine ? "mt-1 rounded-3xl rounded-br-md bg-accent px-4 py-3 text-accent-foreground" : "mt-1 rounded-3xl rounded-bl-md bg-white/10 px-4 py-3 text-stage-foreground"}>
+      <p
+        className={
+          mine
+            ? "mt-1 rounded-3xl rounded-br-md bg-accent px-4 py-3 text-accent-foreground"
+            : "mt-1 rounded-3xl rounded-bl-md bg-white/10 px-4 py-3 text-stage-foreground"
+        }
+      >
         {text}
       </p>
     </div>

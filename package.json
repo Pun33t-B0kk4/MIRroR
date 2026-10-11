@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test lib/engine.test.ts"
+    "test": "tsx --test lib/engine.test.ts lib/game.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.2.0",

@@ -6,12 +6,11 @@ const looks: Record<
   string,
   { skin: string; shade: string; hair: string; cloth: string; style: Hair; glasses?: boolean; earring?: boolean }
 > = {
-  "empty-slide": { skin: "#c68642", shade: "#a86b30", hair: "#2a2118", cloth: "#243056", style: "curls" },
-  "the-joke": { skin: "#8d5524", shade: "#6e3f18", hair: "#1a120e", cloth: "#c47b2b", style: "long" },
-  "office-hours": { skin: "#6b3e26", shade: "#4e2c1c", hair: "#d9d0c7", cloth: "#1f3d34", style: "crop", glasses: true },
-  unfinished: { skin: "#e0ac69", shade: "#c48d4e", hair: "#3a2418", cloth: "#8c3d32", style: "wavy" },
-  "after-the-client": { skin: "#5c3317", shade: "#3f2412", hair: "#2a211c", cloth: "#2c3038", style: "shaved", earring: true },
-  "quiet-kitchen": { skin: "#a56b45", shade: "#8a5534", hair: "#1f6f66", cloth: "#f3e6d4", style: "hijab" },
+  jordan: { skin: "#c68642", shade: "#a86b30", hair: "#2a2118", cloth: "#243056", style: "curls" },
+  priya: { skin: "#8d5524", shade: "#6e3f18", hair: "#1a120e", cloth: "#c47b2b", style: "long" },
+  marcus: { skin: "#5c3317", shade: "#3f2412", hair: "#2a211c", cloth: "#2c3038", style: "crop" },
+  sofia: { skin: "#e0ac69", shade: "#c48d4e", hair: "#3a2418", cloth: "#8c3d32", style: "wavy" },
+  dev: { skin: "#a56b45", shade: "#8a5534", hair: "#1f1a16", cloth: "#1f3d34", style: "shaved", earring: true },
 };
 
 function lookFor(slug: string) {
